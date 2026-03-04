@@ -148,15 +148,27 @@
         const chatMessages = document.getElementById('chat-messages');
 
         const knowledgeBase = [
-           { keywords: ["advance", "credit", "beshi", "অ্যাডভান্স", "ক্রেডিট", "বেশি"], answer: "যদি কোনো কাস্টমার ইনভয়েসের চেয়ে বেশি টাকা দেয়, তবে বাড়তি টাকা অটোমেটিক কাস্টমারের 'Advance Credit' হিসেবে জমা হয়।" },
-           { keywords: ["due", "baki", "soman", "ডিউ", "বাকি", "সমান"], answer: "নতুন ইনভয়েস তৈরির সময় কাস্টমারের যদি Advance Credit থাকে, তবে সিস্টেম অটোমেটিক সেই ক্রেডিট দিয়ে ডিউ অ্যাডজাস্ট করে দিবে।" },
-           { keywords: ["sort", "order", "list", "upore", "সর্ট", "লিস্ট", "উপরে"], answer: "ইনভয়েস লিস্ট এখন 'Creation Date' অনুযায়ী সাজানো। অর্থাৎ সবার শেষে তৈরি করা ইনভয়েসটি সবার উপরে থাকবে।" },
-           { keywords: ["error", "somossa", "mistake", "এরর", "সমস্যা", "ভুল"], answer: "আমি সবসময় ব্যাকগ্রাউন্ডে মনিটর করছি। কোনো এরর হলে আমি লাল বক্সে আপনাকে জানিয়ে দিব এবং 'Monitor Log' ট্যাবে রেকর্ড রাখব।" },
-           { keywords: ["print", "credit dekhabe", "প্রিন্ট", "ক্রেডিট দেখাবে"], answer: "হ্যাঁ, এখন থেকে অ্যাডভান্স ক্রেডিট ইনভয়েস প্রিন্ট করার সময়ও দেখা যাবে।" },
-           { keywords: ["hello", "hi", "ki khobor", "হ্যালো", "হাই"], answer: "হ্যালো! আমি আপনার প্রো ইনভয়েস অ্যাসিস্ট্যান্ট। আপনার কোনো প্রশ্ন থাকলে করতে পারেন।" }
+           { keywords: ["advance", "credit", "beshi", "অ্যাডভান্স", "ক্রেডিট", "বেশি"], answer: "যদি কোনো কাস্টমার ইনভয়েসের চেয়ে বেশি টাকা দেয়, তবে বাড়তি টাকা অটোমেটিক কাস্টমারের 'Advance Credit' হিসেবে জমা হয়।" },
+           { keywords: ["due", "baki", "soman", "ডিউ", "বাকি", "সমান"], answer: "নতুন ইনভয়েস তৈরির সময় কাস্টমারের যদি Advance Credit থাকে, তবে সিস্টেম অটোমেটিক সেই ক্রেডিট দিয়ে ডিউ অ্যাডজাস্ট করে দিবে।" },
+           { keywords: ["sort", "order", "list", "upore", "সর্ট", "লিস্ট", "উপরে"], answer: "ইনভয়েস লিস্ট এখন 'Creation Date' অনুযায়ী সাজানো। অর্থাৎ সবার শেষে তৈরি করা ইনভয়েসটি সবার উপরে থাকবে।" },
+           { keywords: ["error", "somossa", "mistake", "এরর", "সমস্যা", "ভুল"], answer: "আমি সবসময় ব্যাকগ্রাউন্ডে মনিটর করছি। কোনো এরর হলে আমি লাল বক্সে আপনাকে জানিয়ে দিব এবং 'Monitor Log' ট্যাবে রেকর্ড রাখব।" },
+           { keywords: ["print", "credit dekhabe", "প্রিন্ট", "ক্রেডিট দেখাবে"], answer: "হ্যাঁ, এখন থেকে অ্যাডভান্স ক্রেডিট ইনভয়েস প্রিন্ট করার সময়ও দেখা যাবে।" },
+           { keywords: ["hello", "hi", "ki khobor", "হ্যালো", "হাই"], answer: "হ্যালো! আমি আপনার প্রো ইনভয়েস অ্যাসিস্ট্যান্ট। আপনার কোনো প্রশ্ন থাকলে করতে পারেন।" },
+           { keywords: ["clear", "delete", "মুছে ফেলো", "ক্লিয়ার"], answer: "আমি চ্যাট হিস্ট্রি মুছে দিয়েছি।", action: "clear_chat" }
         ];
 
-        function addMessage(text, isUser = false) {
+        const CHAT_KEY = 'proinvoice_assistant_history';
+        const savedChat = localStorage.getItem(CHAT_KEY);
+        if (savedChat) {
+            chatMessages.innerHTML = savedChat;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function saveChatHistory() {
+            localStorage.setItem(CHAT_KEY, chatMessages.innerHTML);
+        }
+
+        function addMessage(text, isUser = false, isTyping = false) {
            const div = document.createElement('div');
            div.style.cssText = `padding:8px 12px;border-radius:8px;max-width:85%;font-size:13px;margin-bottom:4px;word-wrap:break-word;`;
            if (isUser) {
@@ -164,31 +176,68 @@
            } else {
               div.style.background = '#e0e7ff'; div.style.color = '#1e40af'; div.style.alignSelf = 'flex-start'; div.style.borderBottomLeftRadius = '0';
            }
-           div.innerText = text;
+           div.innerHTML = text;
            chatMessages.appendChild(div);
            chatMessages.scrollTop = chatMessages.scrollHeight;
+           if (!isTyping) saveChatHistory();
+           return div;
         }
 
-        function handleChat() {
+        async function fetchLiveData(endpoint) {
+            try {
+                // Using the actual window fetch to bypass the intercepted one just for raw data if needed, but intercepted one is fine
+                const res = await window.fetch('api.php/' + endpoint);
+                if (res.ok) return await res.json();
+            } catch(e) {}
+            return null;
+        }
+
+        async function handleChat() {
            const val = chatInput.value.trim().toLowerCase();
            if (!val) return;
            
            addMessage(chatInput.value, true);
            chatInput.value = '';
 
-           setTimeout(() => {
+           const typingIndicator = addMessage("<span style='font-style:italic;color:#6b7280;animation: pulse 1s infinite;'>টাইপ করছে...</span>", false, true);
+
+           setTimeout(async () => {
+              typingIndicator.remove();
               let found = false;
-              for (const item of knowledgeBase) {
-                 if (item.keywords.some(kw => val.includes(kw))) {
-                    addMessage(item.answer);
-                    found = true;
-                    break;
-                 }
+              let answer = "";
+
+              // Live Data AI
+              if (val.includes("কতজন কাস্টমার") || val.includes("কাস্টমার কয়জন") || val.includes("মোট কাস্টমার") || val.includes("customer")) {
+                  const data = await fetchLiveData('customers');
+                  if (data) { answer = `আপনার সিস্টেমে বর্তমানে মোট <b>${data.length}</b> জন কাস্টমার আছেন।`; found = true; }
+              } else if (val.includes("ইনভয়েস কয়টা") || val.includes("মোট ইনভয়েস") || val.includes("invoice")) {
+                  const data = await fetchLiveData('invoices');
+                  if (data) { answer = `আপনার সিস্টেমে বর্তমানে মোট <b>${data.length}</b> টি ইনভয়েস সেভ করা আছে।`; found = true; }
+              } else if (val.includes("পেমেন্ট") || val.includes("payment")) {
+                   answer = "পেমেন্টের তালিকা আপনি ড্যাশবোর্ড বা ইনভয়েস পেজ থেকে দেখতে পারবেন। অ্যাডভান্স পেমেন্ট অটোমেটিক অ্যাডজাস্ট হয়।"; found = true; 
               }
+
               if (!found) {
-                 addMessage("Ekhon kar jonno amar kache ei proshner uttor nai. Tobe apnar system perfectly kaj korche. Specifc feature (jemn due, advance, order) niye ask korte paren.");
+                  for (const item of knowledgeBase) {
+                     if (item.keywords.some(kw => val.includes(kw))) {
+                        if(item.action === "clear_chat") {
+                            chatMessages.innerHTML = '<div style="background:#e0e7ff;padding:8px 12px;border-radius:8px;align-self:flex-start;max-width:85%;font-size:13px;color:#1e40af;">নমস্তে! আমি আপনার সিস্টেম অ্যাসিস্ট্যান্ট। চ্যাট হিস্ট্রি মুছে ফেলা হয়েছে।</div>';
+                            localStorage.removeItem(CHAT_KEY);
+                            return;
+                        }
+                        answer = item.answer;
+                        found = true;
+                        break;
+                     }
+                  }
               }
-           }, 400);
+
+              if (!found) {
+                 answer = "আমি বুঝতে পারিনি। তবে আপনি আমাকে <b>'মোট কাস্টমার কতজন?'</b> বা <b>'কয়টা ইনভয়েস আছে?'</b> এ ধরনের লাইভ প্রশ্নও করতে পারেন!";
+              }
+              
+              addMessage(answer);
+           }, 700);
         }
 
         chatSend.onclick = handleChat;
