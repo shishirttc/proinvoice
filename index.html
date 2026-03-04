@@ -11,5 +11,57 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function() {
+        const errorContainer = document.createElement('div');
+        errorContainer.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;max-width:350px;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
+        document.body.appendChild(errorContainer);
+
+        function showError(title, message) {
+            const el = document.createElement('div');
+            el.style.cssText = 'background:#fee2e2;border-left:4px solid #ef4444;color:#991b1b;padding:12px 16px;border-radius:6px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);font-size:14px;position:relative;animation:slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);pointer-events:auto;';
+            el.innerHTML = `
+                <div style="font-weight:bold;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
+                    ${title}
+                    <button style="background:none;border:none;color:#991b1b;cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.6;hover:opacity:1;" onclick="this.parentElement.parentElement.remove()">&times;</button>
+                </div>
+                <div style="word-break:break-word;line-height:1.4;">${message}</div>
+            `;
+            errorContainer.appendChild(el);
+            setTimeout(() => { if (el.parentElement) el.remove(); }, 15000); // Auto close after 15s
+        }
+
+        const style = document.createElement('style');
+        style.innerHTML = `@keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
+        document.head.appendChild(style);
+
+        // Catch Runtime JS Errors
+        window.addEventListener('error', function(event) {
+            // Ignore cross-origin script errors or harmless ones
+            if (event.message.includes('ResizeObserver')) return;
+            showError("System Error", event.message);
+        });
+
+        // Catch Unhandled Promises (e.g., async errors)
+        window.addEventListener('unhandledrejection', function(event) {
+            showError("Unhandled Action", event.reason?.message || "An unknown error occurred.");
+        });
+
+        // Monitor Network/API Requests
+        const originalFetch = window.fetch;
+        window.fetch = async function(...args) {
+            try {
+                const response = await originalFetch(...args);
+                if (!response.ok) {
+                    showError("API Request Failed", `Server returned status: ${response.status}`);
+                }
+                return response;
+            } catch (err) {
+                showError("Network Error", "Could not connect to the server.");
+                throw err;
+            }
+        };
+      })();
+    </script>
   </body>
 </html>
