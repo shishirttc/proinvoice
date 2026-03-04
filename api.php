@@ -22,7 +22,12 @@ if ($conn->connect_error) {
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
-$path = $_SERVER['PATH_INFO'] ?? $_SERVER['REQUEST_URI'];
+$request_uri = $_SERVER['REQUEST_URI'];
+$script_name = $_SERVER['SCRIPT_NAME'];
+$base_path = str_replace('api.php', '', $script_name);
+$path = str_replace($base_path, '', $request_uri);
+$path = parse_url($path, PHP_URL_PATH);
+$path = trim($path, '/');
 $data = json_decode(file_get_contents('php://input'), true);
 
 function respond($data, $status = 200) {
