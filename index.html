@@ -13,54 +13,187 @@
     <div id="root"></div>
     <script>
       (function() {
-        const errorContainer = document.createElement('div');
-        errorContainer.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;max-width:350px;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
-        document.body.appendChild(errorContainer);
+        // --- 1. UI Setup ---
+        const widgetContainer = document.createElement('div');
+        widgetContainer.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99999;font-family:system-ui,-apple-system,sans-serif;display:flex;flex-direction:column;align-items:flex-end;gap:15px;pointer-events:none;';
+        document.body.appendChild(widgetContainer);
 
-        function showError(title, message) {
+        // Error & Notification Toasts Container
+        const toastContainer = document.createElement('div');
+        toastContainer.style.cssText = 'display:flex;flex-direction:column;gap:10px;align-items:flex-end;';
+        widgetContainer.appendChild(toastContainer);
+
+        // Main Panel
+        const panel = document.createElement('div');
+        panel.style.cssText = 'width:350px;height:450px;background:white;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,0.15);display:none;flex-direction:column;overflow:hidden;pointer-events:auto;border:1px solid #e5e7eb;transition:all 0.3s ease;';
+        panel.innerHTML = `
+          <div style="background:#2563eb;color:white;padding:12px 16px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;">
+            <span>🤖 System Monitor & Assistant</span>
+            <button id="close-assistant" style="background:none;border:none;color:white;cursor:pointer;font-size:18px;">&times;</button>
+          </div>
+          <div style="display:flex;background:#f3f4f6;border-bottom:1px solid #e5e7eb;">
+            <button id="tab-monitor" style="flex:1;padding:8px;border:none;background:#e5e7eb;cursor:pointer;font-weight:bold;color:#1e40af;">Monitor Log</button>
+            <button id="tab-chat" style="flex:1;padding:8px;border:none;background:transparent;cursor:pointer;color:#6b7280;">Ask Question</button>
+          </div>
+          <div id="view-monitor" style="flex:1;overflow-y:auto;padding:12px;background:#1e293b;color:#a7f3d0;font-family:monospace;font-size:12px;display:flex;flex-direction:column;gap:5px;">
+            <div style="color:#94a3b8;">System initialized... Monitoring active.</div>
+          </div>
+          <div id="view-chat" style="flex:1;display:none;flex-direction:column;background:#f9fafb;">
+            <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
+               <div style="background:#e0e7ff;padding:8px 12px;border-radius:8px;align-self:flex-start;max-width:85%;font-size:13px;color:#1e40af;">Hello! I am your local assistant. Ask me about Advance Credit, Due, Invoices, etc.</div>
+            </div>
+            <div style="padding:10px;background:white;border-top:1px solid #e5e7eb;display:flex;gap:5px;">
+              <input id="chat-input" type="text" placeholder="Ask a question..." style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;outline:none;font-size:13px;">
+              <button id="chat-send" style="background:#2563eb;color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">Send</button>
+            </div>
+          </div>
+        `;
+        widgetContainer.appendChild(panel);
+
+        // Toggle Button
+        const toggleBtn = document.createElement('button');
+        toggleBtn.innerHTML = '🤖';
+        toggleBtn.style.cssText = 'width:50px;height:50px;border-radius:25px;background:#2563eb;color:white;border:none;box-shadow:0 4px 12px rgba(37,99,235,0.4);font-size:24px;cursor:pointer;pointer-events:auto;display:flex;align-items:center;justify-content:center;transition:transform 0.2s;';
+        toggleBtn.onmouseover = () => toggleBtn.style.transform = 'scale(1.1)';
+        toggleBtn.onmouseout = () => toggleBtn.style.transform = 'scale(1)';
+        widgetContainer.appendChild(toggleBtn);
+
+        // --- 2. Logic & Interactions ---
+        let panelOpen = false;
+        toggleBtn.onclick = () => {
+          panelOpen = !panelOpen;
+          panel.style.display = panelOpen ? 'flex' : 'none';
+          if(panelOpen) document.getElementById('chat-input').focus();
+        };
+        document.getElementById('close-assistant').onclick = () => {
+          panelOpen = false;
+          panel.style.display = 'none';
+        };
+
+        const tabMonitor = document.getElementById('tab-monitor');
+        const tabChat = document.getElementById('tab-chat');
+        const viewMonitor = document.getElementById('view-monitor');
+        const viewChat = document.getElementById('view-chat');
+
+        tabMonitor.onclick = () => {
+          tabMonitor.style.background = '#e5e7eb'; tabMonitor.style.fontWeight = 'bold'; tabMonitor.style.color = '#1e40af';
+          tabChat.style.background = 'transparent'; tabChat.style.fontWeight = 'normal'; tabChat.style.color = '#6b7280';
+          viewMonitor.style.display = 'flex'; viewChat.style.display = 'none';
+        };
+        tabChat.onclick = () => {
+          tabChat.style.background = '#e5e7eb'; tabChat.style.fontWeight = 'bold'; tabChat.style.color = '#1e40af';
+          tabMonitor.style.background = 'transparent'; tabMonitor.style.fontWeight = 'normal'; tabMonitor.style.color = '#6b7280';
+          viewChat.style.display = 'flex'; viewMonitor.style.display = 'none';
+        };
+
+        // Notifications
+        function showToast(type, title, message) {
             const el = document.createElement('div');
-            el.style.cssText = 'background:#fee2e2;border-left:4px solid #ef4444;color:#991b1b;padding:12px 16px;border-radius:6px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1);font-size:14px;position:relative;animation:slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);pointer-events:auto;';
-            el.innerHTML = `
-                <div style="font-weight:bold;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
-                    ${title}
-                    <button style="background:none;border:none;color:#991b1b;cursor:pointer;font-size:18px;line-height:1;padding:0;opacity:0.6;hover:opacity:1;" onclick="this.parentElement.parentElement.remove()">&times;</button>
-                </div>
-                <div style="word-break:break-word;line-height:1.4;">${message}</div>
-            `;
-            errorContainer.appendChild(el);
-            setTimeout(() => { if (el.parentElement) el.remove(); }, 15000); // Auto close after 15s
+            const isError = type === 'error';
+            el.style.cssText = `background:${isError ? '#fee2e2' : '#dcfce3'};border-left:4px solid ${isError ? '#ef4444' : '#10b981'};color:${isError ? '#991b1b' : '#065f46'};padding:12px 16px;border-radius:6px;box-shadow:0 4px 6px rgba(0,0,0,0.1);font-size:13px;pointer-events:auto;min-width:250px;`;
+            el.innerHTML = `<div style="font-weight:bold;margin-bottom:4px;">${title}</div><div style="line-height:1.3;">${message}</div>`;
+            toastContainer.appendChild(el);
+            setTimeout(() => { if (el.parentElement) el.remove(); }, isError ? 10000 : 4000);
         }
 
-        const style = document.createElement('style');
-        style.innerHTML = `@keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`;
-        document.head.appendChild(style);
+        // Add to Monitor Log
+        function logAction(msg, isErr = false) {
+           const time = new Date().toLocaleTimeString();
+           const div = document.createElement('div');
+           div.style.color = isErr ? '#f87171' : '#a7f3d0';
+           div.innerHTML = `<span style="color:#64748b;">[${time}]</span> ${msg}`;
+           viewMonitor.appendChild(div);
+           viewMonitor.scrollTop = viewMonitor.scrollHeight;
+        }
 
-        // Catch Runtime JS Errors
-        window.addEventListener('error', function(event) {
-            // Ignore cross-origin script errors or harmless ones
-            if (event.message.includes('ResizeObserver')) return;
-            showError("System Error", event.message);
-        });
+        // --- 3. Monitoring (Network & Errors) ---
+        window.addEventListener('error', e => { if (!e.message.includes('ResizeObserver')) { logAction(`JS Error: ${e.message}`, true); showToast('error', 'System Error', e.message); } });
+        window.addEventListener('unhandledrejection', e => { logAction(`Promise Error: ${e.reason?.message || 'Unknown'}`, true); });
 
-        // Catch Unhandled Promises (e.g., async errors)
-        window.addEventListener('unhandledrejection', function(event) {
-            showError("Unhandled Action", event.reason?.message || "An unknown error occurred.");
-        });
-
-        // Monitor Network/API Requests
         const originalFetch = window.fetch;
         window.fetch = async function(...args) {
+            const url = typeof args[0] === 'string' ? args[0] : args[0].url;
+            const method = (args[1] && args[1].method) ? args[1].method.toUpperCase() : 'GET';
+            
             try {
                 const response = await originalFetch(...args);
-                if (!response.ok) {
-                    showError("API Request Failed", `Server returned status: ${response.status}`);
+                
+                // Track mutations (POST/DELETE) for the Monitor
+                if (method !== 'GET' && url.includes('api.php')) {
+                    let actionName = "Updated Data";
+                    if (url.includes('invoices')) actionName = "Saved Invoice";
+                    if (url.includes('customers')) actionName = "Saved Customer";
+                    if (url.includes('payments')) actionName = "Added Payment";
+                    if (method === 'DELETE') actionName = "Deleted Record";
+                    
+                    if (response.ok) {
+                        logAction(`Success: ${actionName} (${method})`);
+                        showToast('success', 'Action Detected', `${actionName} successfully.`);
+                    } else {
+                        logAction(`Failed: ${actionName} (Status: ${response.status})`, true);
+                        showToast('error', 'API Error', `${actionName} failed. Server returned ${response.status}`);
+                    }
                 }
                 return response;
             } catch (err) {
-                showError("Network Error", "Could not connect to the server.");
+                logAction(`Network Error: ${err.message}`, true);
+                showToast('error', 'Network Error', 'Connection failed.');
                 throw err;
             }
         };
+
+        // --- 4. Chatbot Logic ---
+        const chatInput = document.getElementById('chat-input');
+        const chatSend = document.getElementById('chat-send');
+        const chatMessages = document.getElementById('chat-messages');
+
+        const knowledgeBase = [
+           { keywords: ["advance", "credit", "beshi"], answer: "Jodi kew invoice er theke beshi (advance) taka dey, tahole extra takata automatically Customer er 'Advance Credit' hisebe joma hoy." },
+           { keywords: ["due", "baki", "soman"], answer: "Notun invoice toiri korar somoy, customer er jodi Advance Credit thake, tahole system automatically sei credit diye invoice er due kete (adjust) dibe." },
+           { keywords: ["sort", "order", "list", "upore"], answer: "Invoice list ekhon 'Creation Date' onujayi sajano thake. Mane shobar sheshe je invoice ti toiri korben, seta shobar upore thakbe, date edit korleo position change hobe na." },
+           { keywords: ["error", "somossa", "mistake"], answer: "Ami constantly background a monitor korchi. Kono system error ba fail hole ami lal ronger box e apnake janiye dibo ebong 'Monitor Log' tab e record rakhbo." },
+           { keywords: ["print", "credit dekhabe"], answer: "Haa, ekhon theke Advance credit invoice print korar somoy o dekha jabe." },
+           { keywords: ["hello", "hi", "ki khobor"], answer: "Hello! Ami apnar Pro Invoice assistant. Apnar kono proshno thakle korte paren." }
+        ];
+
+        function addMessage(text, isUser = false) {
+           const div = document.createElement('div');
+           div.style.cssText = `padding:8px 12px;border-radius:8px;max-width:85%;font-size:13px;margin-bottom:4px;word-wrap:break-word;`;
+           if (isUser) {
+              div.style.background = '#2563eb'; div.style.color = 'white'; div.style.alignSelf = 'flex-end'; div.style.borderBottomRightRadius = '0';
+           } else {
+              div.style.background = '#e0e7ff'; div.style.color = '#1e40af'; div.style.alignSelf = 'flex-start'; div.style.borderBottomLeftRadius = '0';
+           }
+           div.innerText = text;
+           chatMessages.appendChild(div);
+           chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function handleChat() {
+           const val = chatInput.value.trim().toLowerCase();
+           if (!val) return;
+           
+           addMessage(chatInput.value, true);
+           chatInput.value = '';
+
+           setTimeout(() => {
+              let found = false;
+              for (const item of knowledgeBase) {
+                 if (item.keywords.some(kw => val.includes(kw))) {
+                    addMessage(item.answer);
+                    found = true;
+                    break;
+                 }
+              }
+              if (!found) {
+                 addMessage("Ekhon kar jonno amar kache ei proshner uttor nai. Tobe apnar system perfectly kaj korche. Specifc feature (jemn due, advance, order) niye ask korte paren.");
+              }
+           }, 400);
+        }
+
+        chatSend.onclick = handleChat;
+        chatInput.onkeypress = (e) => { if (e.key === 'Enter') handleChat(); };
+
       })();
     </script>
   </body>
