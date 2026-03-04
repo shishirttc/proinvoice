@@ -194,6 +194,16 @@
         chatSend.onclick = handleChat;
         chatInput.onkeypress = (e) => { if (e.key === 'Enter') handleChat(); };
 
+        // --- 5. Styles ---
+        const style = document.createElement('style');
+        style.innerHTML = `
+            @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+            #view-monitor::-webkit-scrollbar, #chat-messages::-webkit-scrollbar { width: 5px; }
+            #view-monitor::-webkit-scrollbar-track, #chat-messages::-webkit-scrollbar-track { background: transparent; }
+            #view-monitor::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+            #chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        `;
+        document.head.appendChild(style);
       })();
     </script>
   </body>
