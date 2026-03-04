@@ -239,6 +239,42 @@ try {
                 if (strtolower($status) === 'sent') $status = 'Sent';
                 if (strtolower($status) === 'draft') $status = 'Draft';
 
+                // --- AUTO-APPLY CUSTOMER BALANCE ---
+                $stmt = $conn->prepare("SELECT balance FROM customers WHERE id = ?");
+                $stmt->bind_param("s", $data['customerId']);
+                $stmt->execute();
+                $cust = $stmt->get_result()->fetch_assoc();
+                $customerBalance = (float)($cust['balance'] ?? 0);
+
+                if ($customerBalance > 0 && $total > $amountPaid) {
+                    $toApply = min($customerBalance, $total - $amountPaid);
+                    
+                    // Generate a unique ID for the payment
+                    $paymentId = bin2hex(random_bytes(16)); 
+                    $payDate = date('Y-m-d');
+                    $payMethod = "Credit Applied";
+                    $payNote = "Automatically applied from customer advance credit.";
+                    
+                    $pStmt = $conn->prepare("INSERT INTO payments (id, invoiceId, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?)");
+                    $pStmt->bind_param("sssdss", $paymentId, $data['id'], $payDate, $toApply, $payMethod, $payNote);
+                    $pStmt->execute();
+                    
+                    // Update customer balance
+                    $uStmt = $conn->prepare("UPDATE customers SET balance = balance - ? WHERE id = ?");
+                    $uStmt->bind_param("ds", $toApply, $data['customerId']);
+                    $uStmt->execute();
+                    
+                    // Re-calculate amountPaid for final invoice status
+                    $amountPaid += $toApply;
+                    $invoiceAmountPaid = $amountPaid;
+                    if ($amountPaid >= $total) {
+                        $status = 'Paid';
+                        $invoiceAmountPaid = $total;
+                    } elseif ($amountPaid > 0) {
+                        $status = 'Partially Paid';
+                    }
+                }
+
                 $stmt = $conn->prepare("INSERT INTO invoices (id, invoiceNumber, customerId, date, subtotal, taxRate, taxAmount, discount, total, amountPaid, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE invoiceNumber=?, customerId=?, date=?, subtotal=?, taxRate=?, taxAmount=?, discount=?, total=?, amountPaid=?, status=?, notes=?");
                 $stmt->bind_param("ssssddddddssssssdddddds", 
                     $data['id'], $data['invoiceNumber'], $data['customerId'], $date, $subtotal, $taxRate, $taxAmount, $discount, $total, $invoiceAmountPaid, $status, $data['notes'],
