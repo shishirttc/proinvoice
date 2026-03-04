@@ -56,6 +56,41 @@ try {
     if (stripos($path, 'customers') !== false) {
         $parts = explode('customers/', $path);
         $id = isset($parts[1]) ? trim($parts[1], '/') : null;
+        
+        // --- CUSTOMER LEDGER (Sub-route) ---
+        if ($id && stripos($path, '/ledger') !== false) {
+            $customerId = $id; // ID extracted from path
+            
+            // 1. Fetch Invoices
+            $stmt = $conn->prepare("SELECT id, invoiceNumber as ref, date, total as debit, 0 as credit, 'Invoice' as type FROM invoices WHERE customerId = ?");
+            $stmt->bind_param("s", $customerId);
+            $stmt->execute();
+            $invoices = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            
+            // 2. Fetch Payments
+            $stmt = $conn->prepare("SELECT p.id, i.invoiceNumber as ref, p.date, 0 as debit, p.amount as credit, 'Payment' as type FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?");
+            $stmt->bind_param("s", $customerId);
+            $stmt->execute();
+            $payments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            
+            // 3. Merge and Sort
+            $ledger = array_merge($invoices, $payments);
+            usort($ledger, function($a, $b) {
+                return strtotime($a['date']) - strtotime($b['date']);
+            });
+            
+            // 4. Calculate Running Balance
+            $runningBalance = 0;
+            foreach ($ledger as &$entry) {
+                $runningBalance += ((float)$entry['debit'] - (float)$entry['credit']);
+                $entry['balance'] = $runningBalance;
+                $entry['debit'] = (float)$entry['debit'];
+                $entry['credit'] = (float)$entry['credit'];
+            }
+            
+            respond($ledger);
+        }
+
         if ($method == 'GET') {
             $result = $conn->query("SELECT * FROM customers");
             $customers = $result->fetch_all(MYSQLI_ASSOC) ?: [];
