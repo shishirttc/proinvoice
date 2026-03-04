@@ -166,13 +166,20 @@ try {
                     $inv['total'] = (float)$inv['total'];
                     $inv['amountPaid'] = (float)$inv['amountPaid'];
 
-                    // Force map status for UI display
-                    $s = strtolower($inv['status']);
-                    if ($s === 'partially_paid') $inv['status'] = 'Partially Paid';
-                    else if ($s === 'paid') $inv['status'] = 'Paid';
-                    else if ($s === 'sent') $inv['status'] = 'Sent';
-                    else if ($s === 'draft') $inv['status'] = 'Draft';
-                    else $inv['status'] = ucwords(str_replace('_', ' ', $s));
+                    // --- DYNAMIC STATUS CALCULATION (Real-time) ---
+                    $s = strtolower($inv['status'] ?? 'sent');
+                    if ($inv['total'] > 0) {
+                        if ($inv['amountPaid'] >= $inv['total']) {
+                            $inv['status'] = 'Paid';
+                        } elseif ($inv['amountPaid'] > 0) {
+                            $inv['status'] = 'Partially Paid';
+                        } else {
+                            // If no payments, respect the current status (Draft/Sent)
+                            $inv['status'] = (strtolower($s) === 'draft') ? 'Draft' : 'Sent';
+                        }
+                    } else {
+                        $inv['status'] = (strtolower($s) === 'draft') ? 'Draft' : 'Sent';
+                    }
 
                     $stmt = $conn->prepare("SELECT * FROM invoice_items WHERE invoiceId = ?");
                     $stmt->bind_param("s", $inv['id']);
@@ -215,16 +222,20 @@ try {
                 $total = (float)$data['total'];
                 
                 // --- SMART STATUS CALCULATION ---
-                $status = $data['status'];
-                if ($amountPaid >= $total && $total > 0) {
-                    $status = 'Paid';
-                } elseif ($amountPaid > 0 && $amountPaid < $total) {
-                    $status = 'Partially Paid';
-                } else {
-                    if (empty($status) || strtolower($status) === 'sent' || $status === 'partially_paid') $status = 'Sent';
-                    if (strtolower($status) === 'draft') $status = 'Draft';
-                    if ($status === 'Paid') $status = 'Paid';
+                $status = $data['status'] ?? 'Sent';
+                if ($total > 0) {
+                    if ($amountPaid >= $total) {
+                        $status = 'Paid';
+                    } elseif ($amountPaid > 0) {
+                        $status = 'Partially Paid';
+                    }
                 }
+                
+                // Final sanitize for database enum/varchar
+                if (strtolower($status) === 'partially_paid' || strtolower($status) === 'partially paid') $status = 'Partially Paid';
+                if (strtolower($status) === 'paid') $status = 'Paid';
+                if (strtolower($status) === 'sent') $status = 'Sent';
+                if (strtolower($status) === 'draft') $status = 'Draft';
 
                 $stmt = $conn->prepare("INSERT INTO invoices (id, invoiceNumber, customerId, date, subtotal, taxRate, taxAmount, discount, total, amountPaid, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE invoiceNumber=?, customerId=?, date=?, subtotal=?, taxRate=?, taxAmount=?, discount=?, total=?, amountPaid=?, status=?, notes=?");
                 $stmt->bind_param("ssssddddddssssssdddddds", 
