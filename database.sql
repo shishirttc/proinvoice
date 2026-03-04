@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS invoices (
     amountPaid DECIMAL(15, 2) DEFAULT 0.00,
     status ENUM('Sent', 'Paid', 'Partially Paid', 'Draft', 'Overdue') DEFAULT 'Sent',
     notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (customerId) REFERENCES customers(id) ON DELETE SET NULL
 );
 

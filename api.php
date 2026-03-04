@@ -156,7 +156,7 @@ try {
                 }
                 respond($inv ?: new stdClass());
             } else {
-                $result = $conn->query("SELECT * FROM invoices");
+                $result = $conn->query("SELECT * FROM invoices ORDER BY created_at ASC");
                 $invoices = $result->fetch_all(MYSQLI_ASSOC) ?: [];
                 foreach ($invoices as &$inv) {
                     $inv['subtotal'] = (float)$inv['subtotal'];
@@ -223,9 +223,11 @@ try {
                 
                 // --- SMART STATUS CALCULATION ---
                 $status = $data['status'] ?? 'Sent';
+                $invoiceAmountPaid = $amountPaid;
                 if ($total > 0) {
                     if ($amountPaid >= $total) {
                         $status = 'Paid';
+                        $invoiceAmountPaid = $total; // Cap at total
                     } elseif ($amountPaid > 0) {
                         $status = 'Partially Paid';
                     }
@@ -239,8 +241,8 @@ try {
 
                 $stmt = $conn->prepare("INSERT INTO invoices (id, invoiceNumber, customerId, date, subtotal, taxRate, taxAmount, discount, total, amountPaid, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE invoiceNumber=?, customerId=?, date=?, subtotal=?, taxRate=?, taxAmount=?, discount=?, total=?, amountPaid=?, status=?, notes=?");
                 $stmt->bind_param("ssssddddddssssssdddddds", 
-                    $data['id'], $data['invoiceNumber'], $data['customerId'], $date, $subtotal, $taxRate, $taxAmount, $discount, $total, $amountPaid, $status, $data['notes'],
-                    $data['invoiceNumber'], $data['customerId'], $date, $subtotal, $taxRate, $taxAmount, $discount, $total, $amountPaid, $status, $data['notes']
+                    $data['id'], $data['invoiceNumber'], $data['customerId'], $date, $subtotal, $taxRate, $taxAmount, $discount, $total, $invoiceAmountPaid, $status, $data['notes'],
+                    $data['invoiceNumber'], $data['customerId'], $date, $subtotal, $taxRate, $taxAmount, $discount, $total, $invoiceAmountPaid, $status, $data['notes']
                 );
                 $stmt->execute();
 
@@ -295,7 +297,8 @@ try {
                 $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?)");
                 $date = date('Y-m-d', strtotime($data['date']));
                 $amount = (float)$data['amount'];
-                $stmt->bind_param("sssdss", $data['id'], $data['invoiceId'], $date, $amount, $data['method'], $data['note']);
+                $note = isset($data['note']) ? $data['note'] : "";
+                $stmt->bind_param("sssdss", $data['id'], $data['invoiceId'], $date, $amount, $data['method'], $note);
                 $stmt->execute();
 
                 // 2. Sum ALL payments for this invoice to be 100% accurate
@@ -303,32 +306,52 @@ try {
                 $stmt->bind_param("s", $data['invoiceId']);
                 $stmt->execute();
                 $payResult = $stmt->get_result()->fetch_assoc();
-                $totalPaid = (float)($payResult['totalPaid'] ?? 0);
+                $totalSumOfPayments = (float)($payResult['totalPaid'] ?? 0);
 
                 // 3. Get invoice total to compare
-                $stmt = $conn->prepare("SELECT total FROM invoices WHERE id = ?");
+                $stmt = $conn->prepare("SELECT total, customerId FROM invoices WHERE id = ?");
                 $stmt->bind_param("s", $data['invoiceId']);
                 $stmt->execute();
                 $inv = $stmt->get_result()->fetch_assoc();
 
                 if ($inv) {
                     $invoiceTotal = (float)$inv['total'];
+                    $customerId = $inv['customerId'];
+                    $invoiceAmountPaid = $totalSumOfPayments;
                     $status = 'Partially Paid';
                     
-                    if ($totalPaid >= $invoiceTotal) {
+                    if ($totalSumOfPayments >= $invoiceTotal) {
                         $status = 'Paid';
-                    } elseif ($totalPaid <= 0) {
+                        $invoiceAmountPaid = $invoiceTotal; // Cap for the invoice
+                        
+                        // Handle Overpayment
+                        // Calculate how much was already paid before this payment
+                        $stmt = $conn->prepare("SELECT SUM(amount) as prevPaid FROM payments WHERE invoiceId = ? AND id != ?");
+                        $stmt->bind_param("ss", $data['invoiceId'], $data['id']);
+                        $stmt->execute();
+                        $prevPaid = (float)($stmt->get_result()->fetch_assoc()['prevPaid'] ?? 0);
+                        
+                        $remainingDueBefore = max(0, $invoiceTotal - $prevPaid);
+                        $overpayment = $amount - $remainingDueBefore;
+                        
+                        if ($overpayment > 0) {
+                            // Update customer balance (Credit)
+                            $stmt = $conn->prepare("UPDATE customers SET balance = balance + ? WHERE id = ?");
+                            $stmt->bind_param("ds", $overpayment, $customerId);
+                            $stmt->execute();
+                        }
+                    } elseif ($totalSumOfPayments <= 0) {
                         $status = 'Sent';
                     }
 
                     // 4. Force update the invoice table
                     $stmt = $conn->prepare("UPDATE invoices SET amountPaid = ?, status = ? WHERE id = ?");
-                    $stmt->bind_param("dss", $totalPaid, $status, $data['invoiceId']);
+                    $stmt->bind_param("dss", $invoiceAmountPaid, $status, $data['invoiceId']);
                     $stmt->execute();
                 }
 
                 $conn->commit();
-                respond(["message" => "Payment added", "newStatus" => $status, "totalPaid" => $totalPaid]);
+                respond(["message" => "Payment added", "newStatus" => $status, "totalPaid" => $totalSumOfPayments]);
             } catch (Exception $e) {
                 $conn->rollback();
                 respond(["error" => $e->getMessage()], 500);
