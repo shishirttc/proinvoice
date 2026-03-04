@@ -35,16 +35,16 @@
             <button id="tab-monitor" style="flex:1;padding:8px;border:none;background:#e5e7eb;cursor:pointer;font-weight:bold;color:#1e40af;">Monitor Log</button>
             <button id="tab-chat" style="flex:1;padding:8px;border:none;background:transparent;cursor:pointer;color:#6b7280;">Ask Question</button>
           </div>
-          <div id="view-monitor" style="flex:1;overflow-y:auto;padding:12px;background:#1e293b;color:#a7f3d0;font-family:monospace;font-size:12px;display:flex;flex-direction:column;gap:5px;">
+          <div id="view-monitor" style="flex:1;overflow-y:auto;padding:12px;background:#1e293b;color:#a7f3d0;font-family:monospace;font-size:12px;display:flex;flex-direction:column;gap:5px;scrollbar-width: thin; scrollbar-color: #475569 transparent;">
             <div style="color:#94a3b8;">System initialized... Monitoring active.</div>
           </div>
           <div id="view-chat" style="flex:1;display:none;flex-direction:column;background:#f9fafb;">
-            <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;">
-               <div style="background:#e0e7ff;padding:8px 12px;border-radius:8px;align-self:flex-start;max-width:85%;font-size:13px;color:#1e40af;">Hello! I am your local assistant. Ask me about Advance Credit, Due, Invoices, etc.</div>
+            <div id="chat-messages" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent;">
+               <div style="background:#e0e7ff;padding:8px 12px;border-radius:8px;align-self:flex-start;max-width:85%;font-size:13px;color:#1e40af;">नमस्ते! আমি আপনার সিস্টেম অ্যাসিস্ট্যান্ট। অ্যাডভান্স ক্রেডিট, ডিউ বা ইনভয়েস সম্পর্কে যেকোনো প্রশ্ন করতে পারেন।</div>
             </div>
             <div style="padding:10px;background:white;border-top:1px solid #e5e7eb;display:flex;gap:5px;">
-              <input id="chat-input" type="text" placeholder="Ask a question..." style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;outline:none;font-size:13px;">
-              <button id="chat-send" style="background:#2563eb;color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">Send</button>
+              <input id="chat-input" type="text" placeholder="প্রশ্ন করুন..." style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;outline:none;font-size:13px;">
+              <button id="chat-send" style="background:#2563eb;color:white;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;font-weight:bold;">পাঠান</button>
             </div>
           </div>
         `;
@@ -107,7 +107,7 @@
         }
 
         // --- 3. Monitoring (Network & Errors) ---
-        window.addEventListener('error', e => { if (!e.message.includes('ResizeObserver')) { logAction(`JS Error: ${e.message}`, true); showToast('error', 'System Error', e.message); } });
+        window.addEventListener('error', e => { if (!e.message.includes('ResizeObserver')) { logAction(`JS Error: ${e.message}`, true); showToast('error', 'সিস্টেম এরর', e.message); } });
         window.addEventListener('unhandledrejection', e => { logAction(`Promise Error: ${e.reason?.message || 'Unknown'}`, true); });
 
         const originalFetch = window.fetch;
@@ -120,24 +120,24 @@
                 
                 // Track mutations (POST/DELETE) for the Monitor
                 if (method !== 'GET' && url.includes('api.php')) {
-                    let actionName = "Updated Data";
-                    if (url.includes('invoices')) actionName = "Saved Invoice";
-                    if (url.includes('customers')) actionName = "Saved Customer";
-                    if (url.includes('payments')) actionName = "Added Payment";
-                    if (method === 'DELETE') actionName = "Deleted Record";
+                    let actionName = "ডেটা আপডেট";
+                    if (url.includes('invoices')) actionName = "ইনভয়েস সেভ";
+                    if (url.includes('customers')) actionName = "কাস্টমার সেভ";
+                    if (url.includes('payments')) actionName = "পেমেন্ট অ্যাড";
+                    if (method === 'DELETE') actionName = "রেকর্ড ডিলিট";
                     
                     if (response.ok) {
-                        logAction(`Success: ${actionName} (${method})`);
-                        showToast('success', 'Action Detected', `${actionName} successfully.`);
+                        logAction(`সফল: ${actionName} (${method})`);
+                        showToast('success', 'অ্যাকশন ডিটেক্টেড', `${actionName} সফল হয়েছে।`);
                     } else {
-                        logAction(`Failed: ${actionName} (Status: ${response.status})`, true);
-                        showToast('error', 'API Error', `${actionName} failed. Server returned ${response.status}`);
+                        logAction(`ব্যর্থ: ${actionName} (Status: ${response.status})`, true);
+                        showToast('error', 'API এরর', `${actionName} ব্যর্থ হয়েছে।`);
                     }
                 }
                 return response;
             } catch (err) {
-                logAction(`Network Error: ${err.message}`, true);
-                showToast('error', 'Network Error', 'Connection failed.');
+                logAction(`নেটওয়ার্ক এরর: ${err.message}`, true);
+                showToast('error', 'নেটওয়ার্ক এরর', 'সার্ভারের সাথে কানেক্ট করা যাচ্ছে না।');
                 throw err;
             }
         };
@@ -148,12 +148,12 @@
         const chatMessages = document.getElementById('chat-messages');
 
         const knowledgeBase = [
-           { keywords: ["advance", "credit", "beshi"], answer: "Jodi kew invoice er theke beshi (advance) taka dey, tahole extra takata automatically Customer er 'Advance Credit' hisebe joma hoy." },
-           { keywords: ["due", "baki", "soman"], answer: "Notun invoice toiri korar somoy, customer er jodi Advance Credit thake, tahole system automatically sei credit diye invoice er due kete (adjust) dibe." },
-           { keywords: ["sort", "order", "list", "upore"], answer: "Invoice list ekhon 'Creation Date' onujayi sajano thake. Mane shobar sheshe je invoice ti toiri korben, seta shobar upore thakbe, date edit korleo position change hobe na." },
-           { keywords: ["error", "somossa", "mistake"], answer: "Ami constantly background a monitor korchi. Kono system error ba fail hole ami lal ronger box e apnake janiye dibo ebong 'Monitor Log' tab e record rakhbo." },
-           { keywords: ["print", "credit dekhabe"], answer: "Haa, ekhon theke Advance credit invoice print korar somoy o dekha jabe." },
-           { keywords: ["hello", "hi", "ki khobor"], answer: "Hello! Ami apnar Pro Invoice assistant. Apnar kono proshno thakle korte paren." }
+           { keywords: ["advance", "credit", "beshi", "অ্যাডভান্স", "ক্রেডিট", "বেশি"], answer: "যদি কোনো কাস্টমার ইনভয়েসের চেয়ে বেশি টাকা দেয়, তবে বাড়তি টাকা অটোমেটিক কাস্টমারের 'Advance Credit' হিসেবে জমা হয়।" },
+           { keywords: ["due", "baki", "soman", "ডিউ", "বাকি", "সমান"], answer: "নতুন ইনভয়েস তৈরির সময় কাস্টমারের যদি Advance Credit থাকে, তবে সিস্টেম অটোমেটিক সেই ক্রেডিট দিয়ে ডিউ অ্যাডজাস্ট করে দিবে।" },
+           { keywords: ["sort", "order", "list", "upore", "সর্ট", "লিস্ট", "উপরে"], answer: "ইনভয়েস লিস্ট এখন 'Creation Date' অনুযায়ী সাজানো। অর্থাৎ সবার শেষে তৈরি করা ইনভয়েসটি সবার উপরে থাকবে।" },
+           { keywords: ["error", "somossa", "mistake", "এরর", "সমস্যা", "ভুল"], answer: "আমি সবসময় ব্যাকগ্রাউন্ডে মনিটর করছি। কোনো এরর হলে আমি লাল বক্সে আপনাকে জানিয়ে দিব এবং 'Monitor Log' ট্যাবে রেকর্ড রাখব।" },
+           { keywords: ["print", "credit dekhabe", "প্রিন্ট", "ক্রেডিট দেখাবে"], answer: "হ্যাঁ, এখন থেকে অ্যাডভান্স ক্রেডিট ইনভয়েস প্রিন্ট করার সময়ও দেখা যাবে।" },
+           { keywords: ["hello", "hi", "ki khobor", "হ্যালো", "হাই"], answer: "হ্যালো! আমি আপনার প্রো ইনভয়েস অ্যাসিস্ট্যান্ট। আপনার কোনো প্রশ্ন থাকলে করতে পারেন।" }
         ];
 
         function addMessage(text, isUser = false) {
