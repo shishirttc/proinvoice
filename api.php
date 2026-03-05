@@ -174,7 +174,7 @@ try {
                     $stmt->execute();
                     $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC) ?: [];
                     foreach ($items as &$item) {
-                        $item['quantity'] = (int)$item['quantity'];
+                        $item['quantity'] = (float)$item['quantity'];
                         $item['price'] = (float)$item['price'];
                         $item['total'] = (float)$item['total'];
                     }
@@ -221,7 +221,7 @@ try {
                     $stmt->execute();
                     $items = $stmt->get_result()->fetch_all(MYSQLI_ASSOC) ?: [];
                     foreach ($items as &$item) {
-                        $item['quantity'] = (int)$item['quantity'];
+                        $item['quantity'] = (float)$item['quantity'];
                         $item['price'] = (float)$item['price'];
                         $item['total'] = (float)$item['total'];
                     }
@@ -290,8 +290,8 @@ try {
                     $payMethod = "Credit Applied";
                     $payNote = "Automatically applied from customer advance credit.";
                     
-                    $pStmt = $conn->prepare("INSERT INTO payments (id, invoiceId, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?)");
-                    $pStmt->bind_param("sssdss", $paymentId, $data['id'], $payDate, $toApply, $payMethod, $payNote);
+                    $pStmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                    $pStmt->bind_param("ssssdss", $paymentId, $data['id'], $data['invoiceNumber'], $payDate, $toApply, $payMethod, $payNote);
                     $pStmt->execute();
                     
                     // Update customer balance
@@ -324,10 +324,10 @@ try {
                 if (isset($data['items']) && is_array($data['items'])) {
                     $stmt = $conn->prepare("INSERT INTO invoice_items (id, invoiceId, productId, name, quantity, price, total) VALUES (?, ?, ?, ?, ?, ?, ?)");
                     foreach ($data['items'] as $item) {
-                        $qty = (int)$item['quantity'];
+                        $qty = (float)$item['quantity'];
                         $pr = (float)$item['price'];
                         $tl = (float)$item['total'];
-                        $stmt->bind_param("ssssidd", $item['id'], $data['id'], $item['productId'], $item['name'], $qty, $pr, $tl);
+                        $stmt->bind_param("ssssddd", $item['id'], $data['id'], $item['productId'], $item['name'], $qty, $pr, $tl);
                         $stmt->execute();
                     }
                 }
@@ -364,28 +364,29 @@ try {
         if ($method == 'POST') {
             $conn->begin_transaction();
             try {
-                // 1. Insert the new payment
-                $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?)");
-                $date = date('Y-m-d', strtotime($data['date']));
-                $amount = (float)$data['amount'];
-                $note = isset($data['note']) ? $data['note'] : "";
-                $stmt->bind_param("sssdss", $data['id'], $data['invoiceId'], $date, $amount, $data['method'], $note);
-                $stmt->execute();
-
-                // 2. Sum ALL payments for this invoice to be 100% accurate
-                $stmt = $conn->prepare("SELECT SUM(amount) as totalPaid FROM payments WHERE invoiceId = ?");
-                $stmt->bind_param("s", $data['invoiceId']);
-                $stmt->execute();
-                $payResult = $stmt->get_result()->fetch_assoc();
-                $totalSumOfPayments = (float)($payResult['totalPaid'] ?? 0);
-
                 // 3. Get invoice total to compare
-                $stmt = $conn->prepare("SELECT total, customerId FROM invoices WHERE id = ?");
+                $stmt = $conn->prepare("SELECT total, customerId, invoiceNumber FROM invoices WHERE id = ?");
                 $stmt->bind_param("s", $data['invoiceId']);
                 $stmt->execute();
                 $inv = $stmt->get_result()->fetch_assoc();
 
                 if ($inv) {
+                    $invoiceNumber = $inv['invoiceNumber'];
+                    // 1. Insert the new payment
+                    $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                    $date = date('Y-m-d', strtotime($data['date']));
+                    $amount = (float)$data['amount'];
+                    $note = isset($data['note']) ? $data['note'] : "";
+                    $stmt->bind_param("ssssdss", $data['id'], $data['invoiceId'], $invoiceNumber, $date, $amount, $data['method'], $note);
+                    $stmt->execute();
+
+                    // 2. Sum ALL payments for this invoice to be 100% accurate
+                    $stmt = $conn->prepare("SELECT SUM(amount) as totalPaid FROM payments WHERE invoiceId = ?");
+                    $stmt->bind_param("s", $data['invoiceId']);
+                    $stmt->execute();
+                    $payResult = $stmt->get_result()->fetch_assoc();
+                    $totalSumOfPayments = (float)($payResult['totalPaid'] ?? 0);
+
                     $invoiceTotal = (float)$inv['total'];
                     $customerId = $inv['customerId'];
                     $invoiceAmountPaid = $totalSumOfPayments;

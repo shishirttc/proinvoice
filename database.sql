@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     invoiceId VARCHAR(50),
     productId VARCHAR(50),
     name VARCHAR(255),
-    quantity INT DEFAULT 1,
+    quantity DECIMAL(15, 2) DEFAULT 1.00,
     price DECIMAL(15, 2) DEFAULT 0.00,
     total DECIMAL(15, 2) DEFAULT 0.00,
     FOREIGN KEY (invoiceId) REFERENCES invoices(id) ON DELETE CASCADE
@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 CREATE TABLE IF NOT EXISTS payments (
     id VARCHAR(50) PRIMARY KEY,
     invoiceId VARCHAR(50),
+    invoiceNumber VARCHAR(50),
     date DATE,
     amount DECIMAL(15, 2) DEFAULT 0.00,
     method VARCHAR(50),

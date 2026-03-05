@@ -21,13 +21,13 @@ $customer = $stmt->get_result()->fetch_assoc();
 if (!$customer) die("Customer not found");
 
 // Fetch Invoices (Debits)
-$stmt = $conn->prepare("SELECT invoiceNumber as ref, date, total as debit, 0 as credit, 'Invoice' as type FROM invoices WHERE customerId = ?");
+$stmt = $conn->prepare("SELECT i.id, i.invoiceNumber as ref, i.date, i.total as debit, 0 as credit, 'Invoice' as type, (SELECT SUM(quantity) FROM invoice_items WHERE invoiceId = i.id) as qty FROM invoices i WHERE i.customerId = ?");
 $stmt->bind_param("s", $customerId);
 $stmt->execute();
 $invoices = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Fetch Payments (Credits)
-$stmt = $conn->prepare("SELECT i.invoiceNumber as ref, p.date, 0 as debit, p.amount as credit, 'Payment' as type FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?");
+$stmt = $conn->prepare("SELECT i.invoiceNumber as ref, p.date, 0 as debit, p.amount as credit, 'Payment' as type, 0 as qty FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?");
 $stmt->bind_param("s", $customerId);
 $stmt->execute();
 $payments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -80,6 +80,7 @@ $company = $company_res->fetch_assoc();
                     <tr class="bg-slate-100 border-b border-gray-200">
                         <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest">Date</th>
                         <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest">Description</th>
+                        <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest text-center">Quantity (USD)</th>
                         <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest text-right">Debit (৳)</th>
                         <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest text-right">Credit (৳)</th>
                         <th class="px-6 py-4 text-[10px] font-black uppercase text-gray-500 tracking-widest text-right">Balance (৳)</th>
@@ -88,13 +89,18 @@ $company = $company_res->fetch_assoc();
                 <tbody class="divide-y divide-gray-100">
                     <?php 
                     $runningBalance = 0;
+                    $totalQty = 0;
                     foreach ($ledger as $item): 
                         $runningBalance += ($item['debit'] - $item['credit']);
+                        $totalQty += (float)$item['qty'];
                     ?>
                     <tr class="hover:bg-slate-50 transition-colors">
                         <td class="px-6 py-4 text-sm font-medium text-gray-600"><?php echo date('d/m/Y', strtotime($item['date'])); ?></td>
                         <td class="px-6 py-4 text-sm font-bold text-slate-900">
                             <?php echo $item['type']; ?> #<?php echo htmlspecialchars($item['ref']); ?>
+                        </td>
+                        <td class="px-6 py-4 text-sm font-bold text-center text-blue-600">
+                            <?php echo $item['qty'] > 0 ? number_format($item['qty'], 2) : '-'; ?>
                         </td>
                         <td class="px-6 py-4 text-sm font-bold text-right text-rose-600">
                             <?php echo $item['debit'] > 0 ? number_format($item['debit'], 2) : '-'; ?>
@@ -110,8 +116,12 @@ $company = $company_res->fetch_assoc();
                 </tbody>
                 <tfoot class="bg-slate-900 text-white font-bold">
                     <tr>
-                        <td colspan="4" class="px-6 py-4 text-right uppercase tracking-widest text-xs">Final Net Balance:</td>
-                        <td class="px-6 py-4 text-right text-xl font-black text-blue-400">
+                        <td colspan="2" class="px-6 py-4 text-right uppercase tracking-widest text-[10px] opacity-70">Final Net USD:</td>
+                        <td class="px-6 py-4 text-center text-lg font-black text-blue-400 border-x border-white/5">
+                            <?php echo number_format($totalQty, 2); ?>
+                        </td>
+                        <td colspan="2" class="px-6 py-4 text-right uppercase tracking-widest text-[10px] opacity-70">Final Net Balance:</td>
+                        <td class="px-6 py-4 text-right text-xl font-black text-blue-400 whitespace-nowrap">
                             ৳ <?php echo number_format($runningBalance, 2); ?>
                         </td>
                     </tr>
