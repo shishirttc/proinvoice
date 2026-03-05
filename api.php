@@ -92,6 +92,29 @@ try {
         }
 
         if ($method == 'GET') {
+            if ($id) {
+                $stmt = $conn->prepare("SELECT * FROM customers WHERE id = ?");
+                $stmt->bind_param("s", $id);
+                $stmt->execute();
+                $customer = $stmt->get_result()->fetch_assoc();
+                if ($customer) {
+                    $customer['balance'] = (float)$customer['balance'];
+                    $customer['customerNumber'] = str_pad($customer['customerNumber'], 5, '0', STR_PAD_LEFT);
+                    
+                    // Fetch invoices for this customer
+                    $stmt = $conn->prepare("SELECT i.*, (SELECT SUM(quantity) FROM invoice_items WHERE invoiceId = i.id) as totalQty FROM invoices i WHERE i.customerId = ? ORDER BY i.created_at DESC");
+                    $stmt->bind_param("s", $id);
+                    $stmt->execute();
+                    $customer['invoices'] = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                    
+                    foreach ($customer['invoices'] as &$inv) {
+                        $inv['total'] = (float)$inv['total'];
+                        $inv['amountPaid'] = (float)$inv['amountPaid'];
+                        $inv['totalQty'] = (float)($inv['totalQty'] ?? 0);
+                    }
+                }
+                respond($customer ?: new stdClass());
+            }
             $result = $conn->query("SELECT * FROM customers");
             $customers = $result->fetch_all(MYSQLI_ASSOC) ?: [];
             foreach ($customers as &$c) {
@@ -191,7 +214,7 @@ try {
                 }
                 respond($inv ?: new stdClass());
             } else {
-                $result = $conn->query("SELECT * FROM invoices ORDER BY created_at ASC");
+                $result = $conn->query("SELECT i.*, (SELECT SUM(quantity) FROM invoice_items WHERE invoiceId = i.id) as totalQty FROM invoices i ORDER BY created_at ASC");
                 $invoices = $result->fetch_all(MYSQLI_ASSOC) ?: [];
                 foreach ($invoices as &$inv) {
                     $inv['subtotal'] = (float)$inv['subtotal'];
