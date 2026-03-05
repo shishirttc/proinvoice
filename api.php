@@ -39,6 +39,57 @@ function respond($data, $status = 200) {
 }
 
 try {
+    // --- CUSTOMER SYNC (Recalculate all invoice payments and status) ---
+    if (stripos($path, 'sync/') !== false) {
+        $parts = explode('sync/', $path);
+        $customerId = isset($parts[1]) ? trim($parts[1], '/') : null;
+        if ($customerId) {
+            // 1. First, update EACH invoice's amountPaid based on ITS OWN payments
+            $stmt = $conn->prepare("SELECT id, total FROM invoices WHERE customerId = ?");
+            $stmt->bind_param("s", $customerId);
+            $stmt->execute();
+            $invoices = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            
+            foreach ($invoices as $inv) {
+                $invId = $inv['id'];
+                $total = (float)$inv['total'];
+                
+                // Get physical payments for this invoice
+                $pStmt = $conn->prepare("SELECT COALESCE(SUM(amount), 0) as paid FROM payments WHERE invoiceId = ?");
+                $pStmt->bind_param("s", $invId);
+                $pStmt->execute();
+                $actualPaid = (float)($pStmt->get_result()->fetch_assoc()['paid'] ?? 0);
+                
+                $status = 'Sent';
+                if ($actualPaid >= $total) {
+                    $status = 'Paid';
+                } elseif ($actualPaid > 0) {
+                    $status = 'Partially Paid';
+                }
+                
+                $uStmt = $conn->prepare("UPDATE invoices SET amountPaid = ?, status = ? WHERE id = ?");
+                $uStmt->bind_param("dss", $actualPaid, $status, $invId);
+                $uStmt->execute();
+            }
+
+            // 2. Now calculate the customer's TRUE net balance from scratch: Total Paid - Total Billed
+            $stmt = $conn->prepare("SELECT 
+                (SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?) as totalPaid,
+                (SELECT COALESCE(SUM(total), 0) FROM invoices WHERE customerId = ?) as totalBilled");
+            $stmt->bind_param("ss", $customerId, $customerId);
+            $stmt->execute();
+            $totals = $stmt->get_result()->fetch_assoc();
+            $trueBalance = (float)$totals['totalPaid'] - (float)$totals['totalBilled'];
+            
+            // 3. Update the customer's balance field
+            $uStmt = $conn->prepare("UPDATE customers SET balance = ? WHERE id = ?");
+            $uStmt->bind_param("ds", $trueBalance, $customerId);
+            $uStmt->execute();
+
+            respond(["message" => "Strict sync completed", "trueBalance" => $trueBalance, "totalPaid" => $totals['totalPaid'], "totalBilled" => $totals['totalBilled']]);
+        }
+    }
+
     // --- Company ---
     if (stripos($path, 'company') !== false) {
         if ($method == 'GET') {
@@ -67,8 +118,8 @@ try {
             $stmt->execute();
             $invoices = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
             
-            // 2. Fetch Payments
-            $stmt = $conn->prepare("SELECT p.id, i.invoiceNumber as ref, p.date, 0 as debit, p.amount as credit, 'Payment' as type FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?");
+            // 2. Fetch Payments (Including Wallet Deposits)
+            $stmt = $conn->prepare("SELECT id, COALESCE(invoiceNumber, 'Wallet Deposit') as ref, date, 0 as debit, amount as credit, 'Payment' as type FROM payments WHERE customerId = ?");
             $stmt->bind_param("s", $customerId);
             $stmt->execute();
             $payments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -93,15 +144,25 @@ try {
 
         if ($method == 'GET') {
             if ($id) {
+                // Fetch customer basic info
                 $stmt = $conn->prepare("SELECT * FROM customers WHERE id = ?");
                 $stmt->bind_param("s", $id);
                 $stmt->execute();
                 $customer = $stmt->get_result()->fetch_assoc();
+                
                 if ($customer) {
-                    $customer['balance'] = (float)$customer['balance'];
+                    // Use absolute physical reality: Total(Payments) - Total(Invoices)
+                    $stmt = $conn->prepare("SELECT 
+                        (SELECT COALESCE(SUM(total), 0) FROM invoices WHERE customerId = ?) as totalBilled,
+                        (SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = ?) as totalPaid");
+                    $stmt->bind_param("ss", $id, $id);
+                    $stmt->execute();
+                    $calc = $stmt->get_result()->fetch_assoc();
+                    
+                    $customer['balance'] = (float)$calc['totalPaid'] - (float)$calc['totalBilled'];
                     $customer['customerNumber'] = str_pad($customer['customerNumber'], 5, '0', STR_PAD_LEFT);
                     
-                    // Fetch invoices for this customer
+                    // Fetch invoices
                     $stmt = $conn->prepare("SELECT i.*, (SELECT SUM(quantity) FROM invoice_items WHERE invoiceId = i.id) as totalQty FROM invoices i WHERE i.customerId = ? ORDER BY i.created_at DESC");
                     $stmt->bind_param("s", $id);
                     $stmt->execute();
@@ -109,38 +170,48 @@ try {
                     
                     foreach ($customer['invoices'] as &$inv) {
                         $inv['total'] = (float)$inv['total'];
-                        $inv['amountPaid'] = (float)$inv['amountPaid'];
+                        // Real-time payment sum for this specific invoice
+                        $pStmt = $conn->prepare("SELECT COALESCE(SUM(amount), 0) as paid FROM payments WHERE invoiceId = ?");
+                        $pStmt->bind_param("s", $inv['id']);
+                        $pStmt->execute();
+                        $physicalPaid = (float)($pStmt->get_result()->fetch_assoc()['paid'] ?? 0);
+                        
+                        // Cap amountPaid at invoice total to avoid confusion (50 tk issue)
+                        $inv['amountPaid'] = min($inv['total'], $physicalPaid);
                         $inv['totalQty'] = (float)($inv['totalQty'] ?? 0);
                     }
                 }
                 respond($customer ?: new stdClass());
             }
-            $result = $conn->query("SELECT * FROM customers");
+            
+            // For list of customers, also calculate real-time balance
+            $result = $conn->query("SELECT c.*, 
+                (SELECT COALESCE(SUM(p.amount), 0) FROM payments p JOIN invoices i ON p.invoiceId = i.id WHERE i.customerId = c.id) as totalPaid,
+                (SELECT COALESCE(SUM(total), 0) FROM invoices WHERE customerId = c.id) as totalBilled
+                FROM customers c");
             $customers = $result->fetch_all(MYSQLI_ASSOC) ?: [];
             foreach ($customers as &$c) {
-                $c['balance'] = (float)$c['balance'];
-                // Format customerNumber as 5-digit string (e.g., 00001)
+                $c['balance'] = (float)$c['totalPaid'] - (float)$c['totalBilled'];
                 $c['customerNumber'] = str_pad($c['customerNumber'], 5, '0', STR_PAD_LEFT);
             }
             respond($customers);
         } elseif ($method == 'POST') {
-            // Check if customer already exists to avoid overwriting customerNumber
-            $stmt = $conn->prepare("SELECT id FROM customers WHERE id = ?");
-            $stmt->bind_param("s", $data['id']);
-            $stmt->execute();
-            $exists = $stmt->get_result()->fetch_assoc();
+            $id = $data['id'];
+            $name = $data['name'];
+            $email = $data['email'];
+            $phone = $data['phone'];
+            $address = $data['address'];
+            $balance = isset($data['balance']) ? (float)$data['balance'] : 0.00;
 
-            if ($exists) {
-                $stmt = $conn->prepare("UPDATE customers SET name=?, email=?, phone=?, address=?, balance=? WHERE id=?");
-                $balance = isset($data['balance']) ? (float)$data['balance'] : 0.0;
-                $stmt->bind_param("ssssds", $data['name'], $data['email'], $data['phone'], $data['address'], $balance, $data['id']);
+            // Direct update/insert of customer including the manual balance field
+            $stmt = $conn->prepare("INSERT INTO customers (id, name, email, phone, address, balance) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name=?, email=?, phone=?, address=?, balance=?");
+            $stmt->bind_param("ssssddssssd", $id, $name, $email, $phone, $address, $balance, $name, $email, $phone, $address, $balance);
+            
+            if ($stmt->execute()) {
+                respond(["message" => "Customer saved successfully", "id" => $id, "balance" => $balance]);
             } else {
-                $stmt = $conn->prepare("INSERT INTO customers (id, name, email, phone, address, balance) VALUES (?, ?, ?, ?, ?, ?)");
-                $balance = isset($data['balance']) ? (float)$data['balance'] : 0.0;
-                $stmt->bind_param("sssssd", $data['id'], $data['name'], $data['email'], $data['phone'], $data['address'], $balance);
+                throw new Exception($stmt->error);
             }
-            $stmt->execute();
-            respond(["message" => "Customer saved"]);
         } elseif ($method == 'DELETE' && $id) {
             $stmt = $conn->prepare("DELETE FROM customers WHERE id = ?");
             $stmt->bind_param("s", $id);
@@ -307,22 +378,12 @@ try {
                 if ($customerBalance > 0 && $total > $amountPaid) {
                     $toApply = min($customerBalance, $total - $amountPaid);
                     
-                    // Generate a unique ID for the payment
-                    $paymentId = bin2hex(random_bytes(16)); 
-                    $payDate = date('Y-m-d');
-                    $payMethod = "Credit Applied";
-                    $payNote = "Automatically applied from customer advance credit.";
-                    
-                    $pStmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    $pStmt->bind_param("ssssdss", $paymentId, $data['id'], $data['invoiceNumber'], $payDate, $toApply, $payMethod, $payNote);
-                    $pStmt->execute();
-                    
                     // Update customer balance
                     $uStmt = $conn->prepare("UPDATE customers SET balance = balance - ? WHERE id = ?");
                     $uStmt->bind_param("ds", $toApply, $data['customerId']);
                     $uStmt->execute();
                     
-                    // Re-calculate amountPaid for final invoice status
+                    // Re-calculate amountPaid for final invoice status (without creating a duplicate payment record)
                     $amountPaid += $toApply;
                     $invoiceAmountPaid = $amountPaid;
                     if ($amountPaid >= $total) {
@@ -387,66 +448,82 @@ try {
         if ($method == 'POST') {
             $conn->begin_transaction();
             try {
-                // 3. Get invoice total to compare
-                $stmt = $conn->prepare("SELECT total, customerId, invoiceNumber FROM invoices WHERE id = ?");
-                $stmt->bind_param("s", $data['invoiceId']);
-                $stmt->execute();
-                $inv = $stmt->get_result()->fetch_assoc();
+                $date = date('Y-m-d', strtotime($data['date']));
+                $amount = (float)$data['amount'];
+                $note = isset($data['note']) ? $data['note'] : "";
+                $id = $data['id'];
+                $method_pay = isset($data['method']) ? $data['method'] : "Cash";
 
-                if ($inv) {
-                    $invoiceNumber = $inv['invoiceNumber'];
-                    // 1. Insert the new payment
-                    $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    $date = date('Y-m-d', strtotime($data['date']));
-                    $amount = (float)$data['amount'];
-                    $note = isset($data['note']) ? $data['note'] : "";
-                    $stmt->bind_param("ssssdss", $data['id'], $data['invoiceId'], $invoiceNumber, $date, $amount, $data['method'], $note);
-                    $stmt->execute();
-
-                    // 2. Sum ALL payments for this invoice to be 100% accurate
-                    $stmt = $conn->prepare("SELECT SUM(amount) as totalPaid FROM payments WHERE invoiceId = ?");
+                if (isset($data['invoiceId']) && !empty($data['invoiceId'])) {
+                    // --- CASE 1: Payment for an Invoice ---
+                    $stmt = $conn->prepare("SELECT total, customerId, invoiceNumber FROM invoices WHERE id = ?");
                     $stmt->bind_param("s", $data['invoiceId']);
                     $stmt->execute();
-                    $payResult = $stmt->get_result()->fetch_assoc();
-                    $totalSumOfPayments = (float)($payResult['totalPaid'] ?? 0);
+                    $inv = $stmt->get_result()->fetch_assoc();
 
-                    $invoiceTotal = (float)$inv['total'];
-                    $customerId = $inv['customerId'];
-                    $invoiceAmountPaid = $totalSumOfPayments;
-                    $status = 'Partially Paid';
-                    
-                    if ($totalSumOfPayments >= $invoiceTotal) {
-                        $status = 'Paid';
-                        $invoiceAmountPaid = $invoiceTotal; // Cap for the invoice
-                        
-                        // Handle Overpayment
-                        // Calculate how much was already paid before this payment
-                        $stmt = $conn->prepare("SELECT SUM(amount) as prevPaid FROM payments WHERE invoiceId = ? AND id != ?");
-                        $stmt->bind_param("ss", $data['invoiceId'], $data['id']);
+                    if ($inv) {
+                        $invoiceNumber = $inv['invoiceNumber'];
+                        $customerId = $inv['customerId'];
+                        $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note, customerId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                        $stmt->bind_param("ssssdsss", $id, $data['invoiceId'], $invoiceNumber, $date, $amount, $method_pay, $note, $customerId);
                         $stmt->execute();
-                        $prevPaid = (float)($stmt->get_result()->fetch_assoc()['prevPaid'] ?? 0);
+
+                        $stmt = $conn->prepare("SELECT SUM(amount) as totalPaid FROM payments WHERE invoiceId = ?");
+                        $stmt->bind_param("s", $data['invoiceId']);
+                        $stmt->execute();
+                        $payResult = $stmt->get_result()->fetch_assoc();
+                        $totalSumOfPayments = (float)($payResult['totalPaid'] ?? 0);
+
+                        $invoiceTotal = (float)$inv['total'];
+                        $invoiceAmountPaid = $totalSumOfPayments;
+                        $status = 'Partially Paid';
                         
-                        $remainingDueBefore = max(0, $invoiceTotal - $prevPaid);
-                        $overpayment = $amount - $remainingDueBefore;
-                        
-                        if ($overpayment > 0) {
-                            // Update customer balance (Credit)
-                            $stmt = $conn->prepare("UPDATE customers SET balance = balance + ? WHERE id = ?");
-                            $stmt->bind_param("ds", $overpayment, $customerId);
+                        if ($totalSumOfPayments >= $invoiceTotal) {
+                            $status = 'Paid';
+                            $invoiceAmountPaid = $invoiceTotal;
+                            
+                            $stmt = $conn->prepare("SELECT SUM(amount) as prevPaid FROM payments WHERE invoiceId = ? AND id != ?");
+                            $stmt->bind_param("ss", $data['invoiceId'], $id);
                             $stmt->execute();
+                            $prevPaid = (float)($stmt->get_result()->fetch_assoc()['prevPaid'] ?? 0);
+                            
+                            $remainingDueBefore = max(0, $invoiceTotal - $prevPaid);
+                            $overpayment = $amount - $remainingDueBefore;
+                            
+                            if ($overpayment > 0) {
+                                $stmt = $conn->prepare("UPDATE customers SET balance = balance + ? WHERE id = ?");
+                                $stmt->bind_param("ds", $overpayment, $customerId);
+                                $stmt->execute();
+                            }
+                        } elseif ($totalSumOfPayments <= 0) {
+                            $status = 'Sent';
                         }
-                    } elseif ($totalSumOfPayments <= 0) {
-                        $status = 'Sent';
+
+                        $stmt = $conn->prepare("UPDATE invoices SET amountPaid = ?, status = ? WHERE id = ?");
+                        $stmt->bind_param("dss", $invoiceAmountPaid, $status, $data['invoiceId']);
+                        $stmt->execute();
+                        
+                        $conn->commit();
+                        respond(["message" => "Payment added to invoice", "newStatus" => $status]);
+                    } else {
+                        throw new Exception("Invoice not found");
                     }
-
-                    // 4. Force update the invoice table
-                    $stmt = $conn->prepare("UPDATE invoices SET amountPaid = ?, status = ? WHERE id = ?");
-                    $stmt->bind_param("dss", $invoiceAmountPaid, $status, $data['invoiceId']);
+                } else if (isset($data['customerId']) && !empty($data['customerId'])) {
+                    // --- CASE 2: Direct Wallet Deposit (No Invoice) ---
+                    $customerId = $data['customerId'];
+                    $stmt = $conn->prepare("INSERT INTO payments (id, invoiceId, invoiceNumber, date, amount, method, note, customerId) VALUES (?, NULL, 'Wallet Deposit', ?, ?, ?, ?, ?)");
+                    $stmt->bind_param("ssssdsss", $id, $date, $amount, $method_pay, $note, $customerId);
                     $stmt->execute();
-                }
 
-                $conn->commit();
-                respond(["message" => "Payment added", "newStatus" => $status, "totalPaid" => $totalSumOfPayments]);
+                    $stmt = $conn->prepare("UPDATE customers SET balance = balance + ? WHERE id = ?");
+                    $stmt->bind_param("ds", $amount, $customerId);
+                    $stmt->execute();
+
+                    $conn->commit();
+                    respond(["message" => "Wallet deposit successful", "amount" => $amount]);
+                } else {
+                    throw new Exception("Either invoiceId or customerId is required");
+                }
             } catch (Exception $e) {
                 $conn->rollback();
                 respond(["error" => $e->getMessage()], 500);
